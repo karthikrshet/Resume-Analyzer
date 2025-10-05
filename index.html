@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Resume Analyzer (Client-side)</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:"Montserrat",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  body{background:linear-gradient(135deg,#74ABE2,#5563DE);min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:background .4s ease;padding:24px}
+  .container{background:rgba(255,255,255,.15);backdrop-filter:blur(15px);padding:26px;border-radius:16px;text-align:center;width:min(1150px,100%);box-shadow:0 8px 32px rgba(0,0,0,.2);animation:fadeIn .8s ease}
+  h1{color:#fff;font-size:34px;margin-bottom:10px}
+  p.sub{color:#eef;opacity:.9;margin-bottom:16px;font-size:14px}
+  .row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin-bottom:12px}
+  select,button,input,textarea{padding:10px 12px;border:none;border-radius:8px;font-size:14px}
+  input[type="file"]{background:rgba(255,255,255,.25);color:#fff}
+  textarea{width:100%;min-height:180px;resize:vertical;background:rgba(255,255,255,.92);border-radius:12px;padding:14px;line-height:1.6;color:#111;text-align:left;box-shadow:inset 0 1px 6px rgba(0,0,0,.08)}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media (min-width:980px){ .grid{grid-template-columns:1fr 1fr} }
+  .panel{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:12px;text-align:left}
+  .panel h3{color:#fff;margin-bottom:8px;font-size:16px}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:8px 0}
+  .control{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:10px}
+  .control label{display:block;font-size:12px;opacity:.9;margin-bottom:6px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .chip{background:rgba(255,255,255,.2);color:#fff;border-radius:999px;padding:6px 10px;font-size:12px;border:1px solid rgba(255,255,255,.25)}
+  button{color:#fff;background:#ff7b54;cursor:pointer;transition:transform .2s,background .3s}
+  button:hover{background:#ff5722;transform:translateY(-1px)}
+  button.secondary{background:rgba(255,255,255,.25)}
+  button.secondary:hover{background:rgba(255,255,255,.35)}
+  button.ghost{background:transparent;border:2px solid rgba(255,255,255,.4)}
+  button.ghost:hover{background:rgba(255,255,255,.18)}
+  .status{margin:8px 0 6px;font-weight:700;color:#fff}
+  .warn{color:#ffe08a;font-size:13px;margin:6px 0}
+  .out{min-height:180px;background:rgba(255,255,255,.92);border-radius:12px;padding:14px;text-align:left;line-height:1.6;color:#111;box-shadow:inset 0 1px 6px rgba(0,0,0,.08)}
+  .score{font-size:28px;font-weight:800}
+  .tag{display:inline-block;margin:2px 6px 2px 0;padding:4px 8px;border-radius:999px;background:#eef;color:#333;font-size:12px}
+  .theme-toggle{margin-top:12px;color:#fff;cursor:pointer;font-size:13px;text-decoration:underline;text-align:center}
+  footer{margin-top:16px;color:#fff;font-size:14px;text-align:center}
+  footer strong{color:#ffdd57;cursor:pointer}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+  .dark textarea,.dark .out{background:rgba(20,20,20,.88);color:#f1f1f1}
+</style>
+<!-- pdf.js for client-side PDF text extraction (loaded from CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.8.69/build/pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.8.69/build/pdf.worker.min.js";</script>
+</head>
+<body>
+  <div class="container">
+    <h1>Resume Analyzer</h1>
+    <p class="sub">Upload PDF/TXT or paste text. Pick a target role to get ATS-style score, matched keywords, and suggestions.</p>
+
+    <div class="grid">
+      <!-- Input side -->
+      <div class="panel">
+        <h3>Resume Input</h3>
+        <div class="row">
+          <input id="file" type="file" accept=".pdf,.txt"/>
+          <button id="clearBtn" class="ghost">Clear</button>
+        </div>
+        <textarea id="input" placeholder="Paste your resume text here…"></textarea>
+
+        <div class="controls">
+          <div class="control">
+            <label>Target Role</label>
+            <select id="role">
+              <option value="software">Software Engineer</option>
+              <option value="frontend">Frontend Developer</option>
+              <option value="backend">Backend Developer</option>
+              <option value="data">Data Analyst / Scientist</option>
+              <option value="pm">Product Manager</option>
+              <option value="design">UX/UI Designer</option>
+              <option value="custom">Custom (enter keywords below)</option>
+            </select>
+          </div>
+          <div class="control">
+            <label>Custom Keywords (comma-separated)</label>
+            <input id="customKw" type="text" placeholder="e.g. GraphQL, RabbitMQ, AWS Lambda"/>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="analyzeBtn">🧠 Analyze</button>
+          <button id="copyBtn" class="ghost">📋 Copy Report</button>
+          <button id="downloadBtn" class="ghost">⬇ Download Report</button>
+        </div>
+
+        <div id="status" class="status">Idle</div>
+        <div id="warn" class="warn" style="display:none;"></div>
+        <div class="chips">
+          <span class="chip">PDF/TXT input</span>
+          <span class="chip">Keyword match</span>
+          <span class="chip">Contact extraction</span>
+          <span class="chip">ATS tips</span>
+        </div>
+      </div>
+
+      <!-- Output side -->
+      <div class="panel">
+        <h3>Report</h3>
+        <div id="output" class="out" aria-live="polite">
+          <p><em>No report yet. Click Analyze.</em></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="theme-toggle" id="toggleTheme">Switch Theme</div>
+  </div>
+
+  <footer>Developed by <strong>Karthik Shet</strong></footer>
+
+<script>
+  // ===== Theme =====
+  const themeToggle = document.getElementById("toggleTheme");
+  let dark = false;
+  themeToggle.addEventListener("click", () => {
+    dark = !dark;
+    document.body.classList.toggle("dark", dark);
+    document.body.style.background = dark
+      ? "linear-gradient(135deg,#1f1f1f,#3a3a3a)"
+      : "linear-gradient(135deg,#74ABE2,#5563DE)";
+  });
+
+  // ===== Elements =====
+  const fileEl = document.getElementById("file");
+  const clearBtn = document.getElementById("clearBtn");
+  const inputEl = document.getElementById("input");
+  const roleEl = document.getElementById("role");
+  const customKwEl = document.getElementById("customKw");
+  const analyzeBtn = document.getElementById("analyzeBtn");
+  const copyBtn = document.getElementById("copyBtn");
+  const downloadBtn = document.getElementById("downloadBtn");
+  const outEl = document.getElementById("output");
+  const statusEl = document.getElementById("status");
+  const warnEl = document.getElementById("warn");
+
+  function setStatus(s){ statusEl.textContent = s; }
+  function warn(s){ if(!s){warnEl.style.display="none";warnEl.textContent=""} else {warnEl.style.display="block";warnEl.textContent=s} }
+
+  // ===== Role keyword templates =====
+  const TEMPLATES = {
+    software: ["data structures","algorithms","oop","system design","unit testing","api","database","sql","nosql","aws","azure","gcp","docker","kubernetes","ci/cd","git","linux","python","java","node","typescript"],
+    frontend: ["html","css","javascript","typescript","react","next.js","redux","tailwind","vite","webpack","accessibility","responsive","pwa","ui","ux","testing library","cypress"],
+    backend:  ["node","express","java","spring","python","django","fastapi","rest","graphql","microservices","postgres","mysql","mongodb","redis","rabbitmq","kafka","docker","kubernetes","aws","ci/cd","security","oauth"],
+    data:     ["python","pandas","numpy","sql","etl","statistics","machine learning","scikit-learn","tensorflow","pytorch","tableau","power bi","spark","hadoop","feature engineering","model evaluation"],
+    pm:       ["roadmap","stakeholder","user stories","backlog","agile","scrum","kanban","kpi","a/b testing","analytics","go-to-market","requirements","wireframes","prioritization","okr"],
+    design:   ["ux research","wireframes","prototyping","figma","ui design","design systems","accessibility","usability testing","interaction design","visual design","typography","motion"]
+  };
+
+  // ===== File upload (PDF/TXT) =====
+  fileEl.addEventListener("change", async () => {
+    const f = fileEl.files?.[0];
+    if (!f) return;
+    const ext = f.name.toLowerCase().split(".").pop();
+    setStatus("Reading file…");
+    try {
+      if (ext === "txt") {
+        const txt = await f.text();
+        inputEl.value = txt;
+        setStatus("Loaded TXT");
+      } else if (ext === "pdf") {
+        const arr = new Uint8Array(await f.arrayBuffer());
+        const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
+        let full = "";
+        for (let i=1;i<=pdf.numPages;i++){
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const strings = content.items.map(it=>it.str);
+          full += strings.join(" ") + "\n";
+        }
+        inputEl.value = normalizeSpaces(full);
+        setStatus("Extracted PDF text");
+      } else {
+        warn("Unsupported file type. Use PDF or TXT.");
+        setStatus("Idle");
+      }
+    } catch (e) {
+      console.error(e);
+      warn("Failed to read file. Try another or paste text.");
+      setStatus("Error");
+    }
+  });
+
+  clearBtn.addEventListener("click", () => {
+    fileEl.value = "";
+    inputEl.value = "";
+    outEl.innerHTML = "<p><em>Cleared.</em></p>";
+    setStatus("Cleared");
+    warn("");
+  });
+
+  // ===== Analysis =====
+  analyzeBtn.addEventListener("click", () => {
+    const raw = (inputEl.value || "").trim();
+    if (!raw) { setStatus("Paste or upload a resume first."); return; }
+
+    setStatus("Analyzing…");
+    const text = normalizeSpaces(raw);
+    const lower = text.toLowerCase();
+
+    // contact extraction
+    const email = (text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])[0] || "";
+    const phones = text.match(/(\+?\d[\d\-\s()]{8,}\d)/g) || [];
+    const links = (text.match(/\bhttps?:\/\/[^\s)]+/gi) || []).slice(0,10);
+
+    // sections detection (simple)
+    const hasEdu = /education|b\.?e\.?|btech|mtech|bsc|msc|degree/i.test(text);
+    const hasExp = /experience|work history|employment/i.test(text);
+    const hasProj = /projects?|portfolio/i.test(text);
+    const hasSkills = /skills?|technolog(y|ies)/i.test(text);
+    const hasAchievements = /awards?|achievements?/i.test(text);
+
+    // experience years estimate
+    const yearsHit = text.match(/(\d+(?:\.\d+)?)\s*(\+?\s*)?(years?|yrs)/i);
+    const years = yearsHit ? Number(yearsHit[1]) : null;
+
+    // keywords
+    const role = roleEl.value;
+    let keywords = [];
+    if (role === "custom") {
+      keywords = csvToList(customKwEl.value);
+    } else {
+      keywords = TEMPLATES[role].slice();
+      // also add custom if provided
+      keywords = keywords.concat(csvToList(customKwEl.value));
+    }
+
+    const { matched, missing } = matchKeywords(lower, keywords);
+
+    // score: 70% keyword coverage + 30% structure
+    const cov = keywords.length ? (matched.length / keywords.length) : 0;
+    const structPieces = [hasEdu, hasExp, hasSkills, hasProj].filter(Boolean).length;
+    const structScore = structPieces / 4;
+    let score = Math.round((cov * 0.7 + structScore * 0.3) * 100);
+
+    // suggestions
+    const suggestions = [];
+    if (!hasSkills) suggestions.push("Add a clear 'Skills' section with hard & soft skills.");
+    if (!hasExp) suggestions.push("Include a 'Work Experience' section with bullet points and measurable impact.");
+    if (!hasProj) suggestions.push("Add 1–2 relevant 'Projects' with your role, tech stack, and outcomes.");
+    if (!hasEdu) suggestions.push("List your education details (degree, institution, year).");
+    if (missing.length) suggestions.push(`Consider adding keywords: ${missing.slice(0,12).join(", ")}.`);
+    if (years !== null && years < 2) suggestions.push("Showcase internships, hackathons, freelance, or open-source to strengthen experience.");
+
+    // render
+    outEl.innerHTML = renderReport({
+      role: roleLabel(role),
+      score,
+      matched,
+      missing,
+      email,
+      phones: unique(phones).slice(0,3),
+      links: unique(links),
+      years,
+      hasEdu, hasExp, hasSkills, hasProj, hasAchievements,
+      suggestions
+    });
+
+    setStatus("Done");
+  });
+
+  // ===== Copy & Download report =====
+  copyBtn.addEventListener("click", async () => {
+    const txt = outEl.innerText.trim();
+    if (!txt) return;
+    try {
+      await navigator.clipboard.writeText(txt);
+      setStatus("Report copied");
+    } catch {
+      setStatus("Copy blocked");
+    }
+  });
+
+  downloadBtn.addEventListener("click", () => {
+    const txt = outEl.innerText.trim();
+    if (!txt) return;
+    const blob = new Blob([txt], { type:"text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `resume_report_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.txt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  // ===== Helpers =====
+  function normalizeSpaces(s){ return s.replace(/\s+/g," ").replace(/[ \t]+\n/g,"\n").trim(); }
+  function csvToList(s){ return (s||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>x.toLowerCase()); }
+  function roleLabel(k){
+    return {software:"Software Engineer",frontend:"Frontend Developer",backend:"Backend Developer",data:"Data Analyst / Scientist",pm:"Product Manager",design:"UX/UI Designer",custom:"Custom"}[k] || k;
+  }
+  function matchKeywords(textLower, kws){
+    const matched=[], missing=[];
+    const dedup = Array.from(new Set(kws.map(k=>k.toLowerCase())));
+    dedup.forEach(k=>{
+      const rx = new RegExp(`\\b${escapeReg(k)}\\b`,"i");
+      if (rx.test(textLower)) matched.push(k);
+      else missing.push(k);
+    });
+    return { matched, missing };
+  }
+  function escapeReg(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
+  function unique(arr){ return Array.from(new Set(arr)); }
+
+  function renderReport(d){
+    return `
+      <div><span class="score">${d.score}</span> / 100 — <strong>${d.role}</strong> match</div>
+      <div style="margin-top:8px">
+        ${d.email ? `<div><strong>Email:</strong> ${d.email}</div>` : ""}
+        ${d.phones?.length ? `<div><strong>Phone:</strong> ${d.phones.join(" / ")}</div>` : ""}
+        ${d.links?.length ? `<div><strong>Links:</strong> ${d.links.map(a=>`<span class="tag">${a}</span>`).join(" ")}</div>` : ""}
+        ${d.years!==null ? `<div><strong>Experience:</strong> ~${d.years} years</div>` : ""}
+      </div>
+      <hr style="border:none;height:1px;background:#e7e7e7;margin:12px 0;opacity:.6"/>
+      <div>
+        <strong>Sections detected:</strong>
+        ${tag(d.hasSkills,"Skills")}
+        ${tag(d.hasExp,"Experience")}
+        ${tag(d.hasProj,"Projects")}
+        ${tag(d.hasEdu,"Education")}
+        ${tag(d.hasAchievements,"Achievements")}
+      </div>
+      <div style="margin-top:10px">
+        <strong>Matched keywords (${d.matched.length}):</strong>
+        <div>${d.matched.map(k=>`<span class="tag">${k}</span>`).join(" ") || "<em>None</em>"}</div>
+      </div>
+      <div style="margin-top:10px">
+        <strong>Missing keywords (${d.missing.length}):</strong>
+        <div>${d.missing.map(k=>`<span class="tag" style="background:#ffe9e9">${k}</span>`).join(" ") || "<em>None</em>"}</div>
+      </div>
+      <div style="margin-top:12px">
+        <strong>Suggestions:</strong>
+        <ul style="margin-top:6px;padding-left:18px">
+          ${d.suggestions.length ? d.suggestions.map(s=>`<li>${escapeHTML(s)}</li>`).join("") : "<li><em>Looks good! Consider tailoring to a specific job description.</em></li>"}
+        </ul>
+      </div>
+      <div style="margin-top:12px">
+        <strong>ATS tips:</strong>
+        <ul style="margin-top:6px;padding-left:18px">
+          <li>Use standard section titles (e.g., “Experience”, “Education”, “Skills”).</li>
+          <li>Quantify impact (numbers, %, time saved).</li>
+          <li>Keep formatting simple (avoid tables for core text).</li>
+          <li>Match keywords from the job description.</li>
+        </ul>
+      </div>
+    `;
+  }
+  function tag(ok, label){ return `<span class="tag" style="background:${ok?'#eaffea':'#ffe9e9'}">${label}</span>`; }
+  function escapeHTML(s){ return s.replace(/[&<>"]/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+</script>
+</body>
+</html>
